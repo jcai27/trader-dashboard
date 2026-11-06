@@ -253,8 +253,9 @@ function drawPriceChart(el, ticker, rec) {
     if (!data.length) { el.innerHTML = empty("No price history", "Yahoo returned nothing for this ticker."); return; }
     const css = getComputedStyle(document.documentElement);
     const c = (n) => css.getPropertyValue(n).trim();
-    el.innerHTML = "";
-    priceChart = LightweightCharts.createChart(el, {
+    // The chart lives in an absolutely positioned layer so its size can't feed back into the box's height.
+    el.innerHTML = '<div class="price-chart-host"></div>';
+    priceChart = LightweightCharts.createChart(el.firstChild, {
       autoSize: true,
       layout: { background: { type: "solid", color: "transparent" }, textColor: c("--text-3"), fontFamily: c("--font"), fontSize: 11, attributionLogo: true },
       grid: { vertLines: { color: c("--line") }, horzLines: { color: c("--line") } },
@@ -265,6 +266,15 @@ function drawPriceChart(el, ticker, rec) {
     const up = c("--up");
     const series = priceChart.addSeries(LightweightCharts.AreaSeries, {
       lineColor: up, lineWidth: 2, topColor: up + "40", bottomColor: up + "00", priceLineVisible: false,
+      // Always keep the entry and stop lines in view, even when price never reached them.
+      autoscaleInfoProvider: (base) => {
+        const r = base();
+        if (!r) return r;
+        return { ...r, priceRange: {
+          minValue: Math.min(r.priceRange.minValue, rec.price, rec.stop),
+          maxValue: Math.max(r.priceRange.maxValue, rec.price, rec.stop),
+        } };
+      },
     });
     series.setData(data);
     series.createPriceLine({ price: rec.price, color: c("--text-3"), lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Entry" });
