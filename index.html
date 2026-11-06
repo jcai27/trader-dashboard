@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>News Signal Trader</title>
+  <link rel="preload" href="fonts/public-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="app.css">
+  <script>
+    // Apply the saved theme before first paint.
+    try {
+      const q = new URLSearchParams(location.search).get("theme");
+      const t = q || localStorage.getItem("theme");
+      if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+    } catch (e) {}
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="shell">
+    <nav class="rail" aria-label="Main">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5-6 4 3 7-9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="19" cy="5" r="2" fill="currentColor"/></svg>
+        <span>News Signal Trader</span>
+      </div>
+      <ul class="nav" id="nav"></ul>
+      <div class="rail-foot">
+        <button class="rail-btn" id="theme-toggle" type="button"></button>
+        <p class="rail-note">Recommends trades. Never places them.</p>
+      </div>
+    </nav>
+    <div class="workspace">
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Overview</h1>
+          <p class="sub" id="page-sub"></p>
+        </div>
+        <div class="topbar-right" id="freshness"></div>
+      </header>
+      <main id="main" tabindex="-1" aria-live="polite"></main>
+    </div>
+  </div>
+  <script>window.TRADER_STATIC = true;</script>
+  <script src="icons.js"></script>
+  <script src="vendor/lightweight-charts.standalone.production.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
