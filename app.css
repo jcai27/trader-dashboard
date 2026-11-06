@@ -165,6 +165,41 @@ button, input, select { font: inherit; color: inherit; }
 .icon-btn.spinning .icon { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Run button (starts a run on this PC) */
+.run-wrap { position: relative; }
+.run-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 10px;
+  border: 1px solid var(--line-2); background: var(--panel); border-radius: var(--r);
+  color: var(--text); font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+}
+.run-btn .icon { width: 14px; height: 14px; }
+.run-btn .icon:first-child { color: var(--up-text); }
+.run-btn .icon:last-child:not(:first-child) { color: var(--text-3); }
+.run-btn:hover { border-color: var(--text-3); }
+.run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.run-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 270px; padding: 4px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: var(--r-lg); box-shadow: var(--shadow-pop);
+}
+.run-menu button {
+  display: block; width: 100%; text-align: left; padding: 8px 10px; cursor: pointer;
+  background: none; border: 0; border-radius: var(--r);
+}
+.run-menu button:hover, .run-menu button:focus-visible { background: var(--panel-2); outline-offset: -2px; }
+.run-menu b { display: block; font-size: var(--fs-md); font-weight: 600; color: var(--text); }
+.run-menu span { font-size: var(--fs-xs); color: var(--text-3); }
+.run-status {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; max-width: 380px;
+  border: 1px solid var(--line); background: var(--panel); border-radius: var(--r);
+  font-size: var(--fs-sm); color: var(--text-2);
+}
+.run-status b { color: var(--text); font-weight: 600; white-space: nowrap; }
+.run-status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run-status .icon { width: 14px; height: 14px; flex: none; }
+.run-status .spin { animation: spin 900ms linear infinite; color: var(--up-text); }
+.run-status.ok .icon { color: var(--up-text); }
+.run-status.bad { color: var(--down-text); border-color: color-mix(in oklab, var(--down) 45%, var(--line)); }
+
 main { padding: 20px 24px 40px; outline: none; }
 .page-foot { margin-top: 28px; color: var(--text-3); font-size: var(--fs-xs); max-width: 90ch; }
 
@@ -431,7 +466,7 @@ td.title a:hover { color: var(--up-text); }
 .page { animation: settle 220ms var(--ease); }
 @keyframes settle { from { opacity: 0.4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .page, .skeleton i, .icon-btn.spinning .icon { animation: none; }
+  .page, .skeleton i, .icon-btn.spinning .icon, .run-status .spin { animation: none; }
   * { transition: none !important; }
 }
 

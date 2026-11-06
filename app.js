@@ -17,6 +17,7 @@ const state = {
   loading: true, error: null,
   sort: {}, ideaIdx: 0, themeKey: null,
   hq: "", minRel: 0.3, hTheme: "",
+  run: { on: false, reachable: null, status: null, menu: false, phase: "idle", message: "" },
 };
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -621,7 +622,113 @@ function renderFreshness() {
     return `<span class="fresh" title="${stale ? "Older than " + staleH + " hours" : "Recent"}"><span class="dot ${stale ? "stale" : "ok"}"></span>${label} <b>${etTime(iso)}</b></span>`;
   };
   $("#freshness").innerHTML = chip("Model run", m?.run_at, 24) + chip("Recap", rc?.created_at, 30)
-    + `<button class="icon-btn" id="reload" type="button" title="Reload data" aria-label="Reload data">${icon("refresh-cw")}</button>`;
+    + `<button class="icon-btn" id="reload" type="button" title="Reload data" aria-label="Reload data">${icon("refresh-cw")}</button>`
+    + runControl();
+}
+
+/* ---------- Run button ----------
+   Starts a run on this PC through the local dashboard server (server.py), which starts the
+   same Windows scheduled task the timetable uses. The published site only shows the button
+   after visiting it once with ?runner=on, so other visitors never see it. */
+
+const RUNNER = window.TRADER_STATIC ? "http://127.0.0.1:8600" : "";
+const RUN_MODES = {
+  morning: { label: "Morning analysis", desc: "Read the news, suggest trades · about 5 min" },
+  recap: { label: "Post-market recap", desc: "Explain why the market moved · 5 to 10 min" },
+};
+
+function runnerWanted() {
+  if (!window.TRADER_STATIC) return true;
+  const q = new URLSearchParams(location.search).get("runner");
+  try {
+    if (q === "on" || q === "off") localStorage.setItem("runner", q);
+    return localStorage.getItem("runner") === "on";
+  } catch (e) { return q === "on"; }
+}
+
+async function runnerFetch(method, body) {
+  const r = await fetch(RUNNER + "/api/runner", {
+    method, cache: "no-store", targetAddressSpace: "loopback",
+    headers: body ? { "Content-Type": "application/json", "X-Trader-Run": "1" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || `The server returned ${r.status}`);
+  return data;
+}
+
+function runControl() {
+  const run = state.run;
+  if (!run.on) return "";
+  const s = run.status;
+  if (run.phase === "running" || run.phase === "publishing") {
+    const what = RUN_MODES[s?.mode]?.label || "Run";
+    const step = run.phase === "publishing" ? "Updating the public site..." : (s?.progress || "Starting...");
+    return `<span class="run-status" role="status">${icon("loader-circle").replace('class="icon"', 'class="icon spin"')}<b>${what}</b><span>${esc(step)}</span></span>`;
+  }
+  const note = run.phase === "done" ? `<span class="run-status ok" role="status">${icon("check")}<span>${esc(run.message)}</span></span>`
+    : run.phase === "failed" ? `<span class="run-status bad" role="status" title="${esc(run.message)}">${icon("circle-x")}<span>${esc(run.message)}</span></span>` : "";
+  if (run.reachable === false) {
+    return note + `<button class="run-btn" type="button" disabled title="Can't reach the dashboard server on this PC. It starts when you log in, or run start_web.bat.">${icon("play")}<span>Run analysis</span></button>`;
+  }
+  const menu = run.menu ? `<div class="run-menu" role="menu">${Object.entries(RUN_MODES).map(([k, m]) =>
+    `<button type="button" role="menuitem" data-run="${k}"><b>${m.label}</b><span>${m.desc}</span></button>`).join("")}</div>` : "";
+  return note + `<div class="run-wrap"><button class="run-btn" id="run-btn" type="button" aria-haspopup="menu" aria-expanded="${run.menu}">${icon("play")}<span>Run analysis</span>${icon("chevron-down")}</button>${menu}</div>`;
+}
+
+function setRun(patch) { Object.assign(state.run, patch); renderFreshness(); }
+
+let runTimer = null;
+async function pollRunner() {
+  clearTimeout(runTimer);
+  try {
+    const s = await runnerFetch("GET");
+    const was = state.run.phase;
+    setRun({ reachable: true, status: s });
+    if (s.running) {
+      setRun({ phase: "running" });
+      runTimer = setTimeout(pollRunner, 4000);
+    } else if (was === "running") {
+      finishRun(s);
+    }
+  } catch (e) {
+    setRun({ reachable: false });
+    if (state.run.phase === "running") runTimer = setTimeout(pollRunner, 8000);
+  }
+}
+
+async function finishRun(s) {
+  if (!s.ok) {
+    setRun({ phase: "failed", message: "Run failed. See reports/logs on this PC." + (s.error ? " " + s.error : "") });
+    return;
+  }
+  if (s.note) { setRun({ phase: "done", message: s.note }); return; }
+  if (window.TRADER_STATIC) {
+    // The run pushed new data to GitHub; wait for GitHub Pages to serve it.
+    setRun({ phase: "publishing" });
+    const deadline = Date.now() + 10 * 60e3;
+    while (Date.now() < deadline) {
+      try {
+        const meta = await fetch("data/meta.json", { cache: "no-store" }).then((r) => r.json());
+        if (meta.published_at && meta.published_at > s.started_at) break;
+      } catch (e) { /* keep waiting */ }
+      await new Promise((r) => setTimeout(r, 15000));
+    }
+  }
+  await loadAll();
+  setRun({ phase: "done", message: `${RUN_MODES[s.mode]?.label || "Run"} finished` });
+  setTimeout(() => { if (state.run.phase === "done") setRun({ phase: "idle" }); }, 15000);
+}
+
+async function startRun(mode) {
+  setRun({ menu: false, phase: "running", status: { mode, progress: "Starting..." } });
+  try {
+    const s = await runnerFetch("POST", { mode });
+    setRun({ status: s });
+    runTimer = setTimeout(pollRunner, 3000);
+  } catch (e) {
+    setRun({ phase: "failed", message: "Couldn't start: " + e.message });
+  }
 }
 
 function renderThemeToggle() {
@@ -707,6 +814,10 @@ document.addEventListener("click", (e) => {
   }
   const th = e.target.closest("[data-theme]");
   if (th) { state.themeKey = th.dataset.theme; render(); return; }
+  const runItem = e.target.closest("[data-run]");
+  if (runItem) { startRun(runItem.dataset.run); return; }
+  if (e.target.closest("#run-btn")) { setRun({ menu: !state.run.menu }); $(".run-menu button")?.focus(); return; }
+  if (state.run.menu && !e.target.closest(".run-menu")) setRun({ menu: false });
   if (e.target.closest("#reload")) {
     const b = $("#reload"); b.disabled = true; b.classList.add("spinning");
     loadAll();
@@ -722,6 +833,7 @@ document.addEventListener("click", (e) => {
 });
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && state.run.menu) { setRun({ menu: false }); $("#run-btn")?.focus(); return; }
   const row = e.target.closest?.("tr[data-idea]");
   if (row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); row.click(); }
 });
@@ -755,3 +867,4 @@ window.addEventListener("hashchange",() => { render(); window.scrollTo(0, 0); ma
 
 renderThemeToggle();
 loadAll();
+if (runnerWanted()) { state.run.on = true; pollRunner(); }
