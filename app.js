@@ -446,7 +446,7 @@ function pageThemes() {
   const reading = v.score > 0.05 ? a.plus : v.score < -0.05 ? a.minus : "neutral";
   const rows = entries.map(([key, val]) => {
     const w = Math.min(Math.abs(val.score), 1) * 50;
-    return `<button type="button" class="tbar ${val.heat > 0 ? "" : "quiet"}" data-theme="${key}" aria-pressed="${key === k}">
+    return `<button type="button" class="tbar ${val.heat > 0 ? "" : "quiet"}" data-axis="${key}" aria-pressed="${key === k}">
       <span>${esc(themeName(key))}</span>
       <span class="tbar-track"><span class="tbar-fill ${val.score >= 0 ? "pos" : "neg"}" style="width:${w}%"></span></span>
       <span class="num ${tone(val.score)}">${val.heat > 0 ? signed(val.score) : "–"}</span>
@@ -622,7 +622,7 @@ function renderFreshness() {
     return `<span class="fresh" title="${stale ? "Older than " + staleH + " hours" : "Recent"}"><span class="dot ${stale ? "stale" : "ok"}"></span>${label} <b>${etTime(iso)}</b></span>`;
   };
   $("#freshness").innerHTML = chip("Model run", m?.run_at, 24) + chip("Recap", rc?.created_at, 30)
-    + `<button class="icon-btn" id="reload" type="button" title="Reload data" aria-label="Reload data">${icon("refresh-cw")}</button>`
+    + `<button class="icon-btn${state.reloading ? " spinning" : ""}" id="reload" type="button" title="Reload data" aria-label="Reload data"${state.reloading ? " disabled" : ""}>${icon("refresh-cw")}</button>`
     + runControl();
 }
 
@@ -668,8 +668,11 @@ function runControl() {
   }
   const note = run.phase === "done" ? `<span class="run-status ok" role="status">${icon("check")}<span>${esc(run.message)}</span></span>`
     : run.phase === "failed" ? `<span class="run-status bad" role="status" title="${esc(run.message)}">${icon("circle-x")}<span>${esc(run.message)}</span></span>` : "";
+  if (run.reachable === null) {
+    return note + `<button class="run-btn" type="button" disabled title="Connecting to this PC. If Chrome asks to access devices on your local network, click Allow.">${icon("loader-circle").replace('class="icon"', 'class="icon spin"')}<span>Connecting...</span></button>`;
+  }
   if (run.reachable === false) {
-    return note + `<button class="run-btn" type="button" disabled title="Can't reach the dashboard server on this PC. It starts when you log in, or run start_web.bat.">${icon("play")}<span>Run analysis</span></button>`;
+    return note + `<button class="run-btn" type="button" disabled title="Can't reach the dashboard server on this PC. Run start_web.bat, then reload.">${icon("play")}<span>Run analysis</span></button>`;
   }
   const menu = run.menu ? `<div class="run-menu" role="menu">${Object.entries(RUN_MODES).map(([k, m]) =>
     `<button type="button" role="menuitem" data-run="${k}"><b>${m.label}</b><span>${m.desc}</span></button>`).join("")}</div>` : "";
@@ -769,6 +772,7 @@ async function getJSON(url) {
 
 async function loadAll() {
   state.loading = !state.meta;
+  state.reloading = true;
   render();
   try {
     const [meta, morning, recaps, scorecard] = await Promise.all([
@@ -780,6 +784,7 @@ async function loadAll() {
     state.error = e.message;
   }
   state.loading = false;
+  state.reloading = false;
   render();
   loadTrack();
 }
@@ -812,14 +817,13 @@ document.addEventListener("click", (e) => {
     if (currentRoute().id !== "ideas") location.hash = "#/ideas"; else render();
     return;
   }
-  const th = e.target.closest("[data-theme]");
-  if (th) { state.themeKey = th.dataset.theme; render(); return; }
+  const th = e.target.closest("[data-axis]");
+  if (th) { state.themeKey = th.dataset.axis; render(); return; }
   const runItem = e.target.closest("[data-run]");
   if (runItem) { startRun(runItem.dataset.run); return; }
   if (e.target.closest("#run-btn")) { setRun({ menu: !state.run.menu }); $(".run-menu button")?.focus(); return; }
   if (state.run.menu && !e.target.closest(".run-menu")) setRun({ menu: false });
   if (e.target.closest("#reload")) {
-    const b = $("#reload"); b.disabled = true; b.classList.add("spinning");
     loadAll();
     return;
   }

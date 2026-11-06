@@ -196,7 +196,7 @@ button, input, select { font: inherit; color: inherit; }
 .run-status b { color: var(--text); font-weight: 600; white-space: nowrap; }
 .run-status span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .run-status .icon { width: 14px; height: 14px; flex: none; }
-.run-status .spin { animation: spin 900ms linear infinite; color: var(--up-text); }
+.run-btn .spin, .run-status .spin { animation: spin 900ms linear infinite; color: var(--up-text); }
 .run-status.ok .icon { color: var(--up-text); }
 .run-status.bad { color: var(--down-text); border-color: color-mix(in oklab, var(--down) 45%, var(--line)); }
 
@@ -466,7 +466,7 @@ td.title a:hover { color: var(--up-text); }
 .page { animation: settle 220ms var(--ease); }
 @keyframes settle { from { opacity: 0.4; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .page, .skeleton i, .icon-btn.spinning .icon, .run-status .spin { animation: none; }
+  .page, .skeleton i, .icon-btn.spinning .icon, .run-btn .spin, .run-status .spin { animation: none; }
   * { transition: none !important; }
 }
 
