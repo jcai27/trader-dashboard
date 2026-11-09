@@ -9,11 +9,13 @@ const ROUTES = [
   { id: "headlines", label: "Headlines", icon: "newspaper", sub: "Every headline the model scored as market-relevant" },
   { id: "why", label: "Why it moved", icon: "search-check", sub: "Post-market recap: what moved, why, and how the morning calls held up" },
   { id: "track", label: "Track record", icon: "chart-no-axes-column", sub: "How past ideas have done against SPY, and which themes the model reads well" },
+  { id: "paper", label: "Paper trading", icon: "flask-conical", sub: "Every morning idea traded by fixed rules on real prices, to see whether it makes money" },
 ];
 
 const state = {
   meta: null, morning: null, recaps: [], recap: null, scorecard: [],
   track: null, trackError: null, trackLoading: false,
+  paper: null, paperError: null, paperLoading: false,
   loading: true, error: null,
   sort: {}, ideaIdx: 0, themeKey: null,
   hq: "", minRel: 0.3, hTheme: "",
@@ -664,7 +666,109 @@ function pageTrack() {
   return `<div class="page stack">${trackSummaryPanel()}${ideas}${scorecard}</div>`;
 }
 
-const PAGES = { overview: pageOverview, ideas: pageIdeas, themes: pageThemes, headlines: pageHeadlines, why: pageWhy, track: pageTrack };
+function rText(x) { return x == null ? "–" : `${signed(x)}R`; }
+
+function curveSvg(points, W) {
+  const H = 200, L = 52, R = 16, top = 14, bottom = 26;
+  const pts = [{ date: null, r: 0 }, ...points];
+  const vals = pts.map((p) => p.r);
+  const need = Math.max(1, ...vals.map(Math.abs));
+  const tick = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50].find((s) => s * 2 >= need) || 50;
+  const lo = Math.min(0, ...vals) < 0 ? -tick * Math.ceil(-Math.min(...vals) / tick) : 0;
+  const hi = Math.max(tick, tick * Math.ceil(Math.max(...vals) / tick));
+  const x = (i) => L + (i / (pts.length - 1)) * (W - L - R);
+  const y = (v) => top + ((hi - v) / (hi - lo)) * (H - top - bottom);
+  const grid = [];
+  for (let v = lo; v <= hi + 1e-9; v += tick) {
+    grid.push(`<line class="${Math.abs(v) < 1e-9 ? "zero" : "grid-line"}" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${Math.abs(v) < 1e-9 ? "0R" : signed(v, Number.isInteger(v) ? 0 : 1) + "R"}</text>`);
+  }
+  const line = pts.map((p, i) => `${x(i).toFixed(1)},${y(p.r).toFixed(1)}`).join(" ");
+  const last = pts[pts.length - 1];
+  const dots = points.map((p, i) => `<circle class="${p.r >= (pts[i].r) ? "dot-pos" : "dot-neg"}" cx="${x(i + 1)}" cy="${y(p.r)}" r="3"><title>${esc(`${shortDate(p.date)}: ${p.side === "LONG" ? "Long" : "Short"} ${p.ticker} closed · total ${rText(p.r)}`)}</title></circle>`).join("");
+  const dateLbl = (i, anchor) => `<text x="${x(i)}" y="${H - 8}" text-anchor="${anchor}">${shortDate(pts[i].date)}</text>`;
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="Cumulative result of closed paper trades, in R">
+    ${grid.join("")}<polyline class="curve ${last.r >= 0 ? "pos" : "neg"}" points="${line}"/>${dots}
+    ${dateLbl(1, "start")}${pts.length > 2 ? dateLbl(pts.length - 1, "end") : ""}</svg>`;
+}
+
+function optionCell(t) {
+  const o = t.option;
+  if (!t.option_name) return '<span class="muted">–</span>';
+  if (o?.skipped) return `<span class="muted">${esc(t.option_name)} · skipped</span>`;
+  if (o?.ret == null) return `<span class="muted">${esc(t.option_name)}</span>`;
+  return `${esc(t.option_name)} <span class="${tone(o.ret)}">${pct(o.ret, 0)}</span>`;
+}
+
+function statusPill(t) {
+  const label = { pending: "Waiting for the open", open: "Open", closed: "Closed", skipped: "Skipped" }[t.status] || t.status;
+  return `<span class="status ${esc(t.status)}">${label}</span>`;
+}
+
+function pagePaper() {
+  if (state.paperError) return `<div class="page">${panel("Paper trading", `<div class="empty error">${esc(state.paperError)}</div>`)}</div>`;
+  if (!state.paper) return `<div class="page">${panel("Paper trading", skeleton(8), { meta: "Checking current prices…" })}</div>`;
+  const p = state.paper, s = p.stats, c = p.counts;
+  const local = p.account_size != null;
+  if (!p.trades.length) return `<div class="page">${panel("Paper trading", empty("No paper trades yet", "The next morning run adds its ideas here."))}</div>`;
+  const wins = s.filled ? Math.round(s.win_rate * s.filled) : 0;
+  const bt = p.backtest;
+  const stats = `<dl class="stat-row">
+      <div class="stat"><dt>Closed trades</dt><dd>${c.closed}<small>${c.skipped} skipped</small></dd></div>
+      <div class="stat"><dt>Win rate</dt><dd>${s.filled ? Math.round(s.win_rate * 100) + "%" : "–"}${s.filled ? `<small>${wins} of ${s.filled}</small>` : ""}</dd></div>
+      <div class="stat" title="R = the amount risked on a trade (entry to stop). +1R means it made what it risked."><dt>Average per trade</dt><dd class="${tone(s.avg_r)}">${rText(s.avg_r)}</dd></div>
+      ${local
+        ? `<div class="stat"><dt>Closed P&amp;L</dt><dd class="${tone(s.pnl)}">${s.filled ? (s.pnl >= 0 ? "+" : "−") + money(Math.abs(s.pnl), 0) : "–"}${s.filled ? `<small>${pct(s.pnl / p.account_size, 1)} of account</small>` : ""}</dd></div>`
+        : `<div class="stat"><dt>Total</dt><dd class="${tone(s.total_r)}">${rText(s.total_r)}</dd></div>`}
+    </dl>`;
+  const notes = [
+    `Started ${shortDate(p.started)}. ${c.open} open (${rText(p.open_r)} so far)${c.pending ? `, ${c.pending} waiting for the open` : ""}.`,
+    bt ? `Backtest for comparison (${shortDate(bt.start)}–${shortDate(bt.end)}): ${bt.trades} trades, ${Math.round(bt.win_rate * 100)}% win rate, ${rText(bt.avg_r)} per trade.` : "",
+    s.filled < 30 ? "Needs about 30+ closed trades before the numbers mean much." : "",
+  ].filter(Boolean).join(" ");
+  const summary = panel("Paper account", stats, { flush: true, note: notes });
+
+  const curve = panel("Cumulative result", p.curve.length
+    ? chartSlot((w) => curveSvg(p.curve, w))
+    : empty("Starts when the first trade closes", "Each closed trade adds its result in R."),
+  { meta: p.curve.length ? `${p.curve.length} closed` : "" });
+
+  const live = p.trades.filter((t) => t.status === "open" || t.status === "pending");
+  const done = p.trades.filter((t) => t.status === "closed" || t.status === "skipped");
+  const open = panel("Open and waiting", live.length ? table("paper-open", [
+    { key: "trade_day", label: "Entered", html: (t) => `<span class="nowrap">${shortDate(t.session || t.trade_day)}</span>` },
+    { key: "side", label: "Side", html: (t) => sidePill(t.side) },
+    { key: "ticker", label: "Ticker", html: (t) => `<span class="ticker">${esc(t.ticker)}</span>` },
+    { key: "status", label: "Status", html: statusPill },
+    { key: "entry", label: "Entry", num: true, html: (t) => t.entry == null ? `<span class="muted">limit ${money(t.limit)}</span>` : money(t.entry) },
+    { key: "exit", label: "Now", num: true, html: (t) => money(t.exit) },
+    { key: "stop", label: "Stop", num: true, html: (t) => money(t.stop) },
+    { key: "target", label: "Target", num: true, html: (t) => money(t.target) },
+    { key: "r", label: "So far", num: true, html: (t) => `<span class="${tone(t.r)}">${rText(t.r)}</span>` },
+    { key: "ret", label: "Return", num: true, html: (t) => `<span class="${tone(t.ret)}">${pct(t.ret)}</span>` },
+    { key: "option_name", label: "Options play", sortable: false, html: optionCell },
+  ], live, { defaultSort: { key: "trade_day", dir: "desc" } }) : empty("Nothing open", "New ideas are added after each morning run."),
+  { flush: true });
+
+  const reasons = { stop: "Stopped out", target: "Hit target", time: "Time's up" };
+  const closed = panel("Closed and skipped", done.length ? table("paper-closed", [
+    { key: "trade_day", label: "Entered", html: (t) => `<span class="nowrap">${shortDate(t.session || t.trade_day)}</span>` },
+    { key: "side", label: "Side", html: (t) => sidePill(t.side) },
+    { key: "ticker", label: "Ticker", html: (t) => `<span class="ticker">${esc(t.ticker)}</span>` },
+    { key: "reason", label: "Outcome", html: (t) => t.status === "skipped" ? `<span class="muted">Skipped: ${esc(t.skip || "")}</span>` : esc(reasons[t.reason] || t.reason || "") },
+    { key: "entry", label: "Entry", num: true, html: (t) => money(t.entry) },
+    { key: "exit", label: "Exit", num: true, html: (t) => money(t.exit) },
+    { key: "days_held", label: "Days", num: true, html: (t) => t.days_held ?? "–" },
+    { key: "r", label: "Result", num: true, html: (t) => `<span class="${tone(t.r)}">${rText(t.r)}</span>` },
+    { key: "ret", label: "Return", num: true, html: (t) => `<span class="${tone(t.ret)}">${pct(t.ret)}</span>` },
+    { key: "spy", label: "vs SPY same bet", num: true, val: (t) => t.ret == null || t.spy_same_side == null ? null : t.ret - t.spy_same_side, html: (t) => t.ret == null || t.spy_same_side == null ? "–" : `<span class="${tone(t.ret - t.spy_same_side)}">${pct(t.ret - t.spy_same_side)}</span>` },
+    { key: "option_name", label: "Options play", sortable: false, html: optionCell },
+  ], done, { defaultSort: { key: "trade_day", dir: "desc" }, maxHeight: true }) : empty("Nothing closed yet", "Trades close at their stop, their target, or the end of their holding period."),
+  { flush: true, note: "Rules: limit entry on the first session after the idea (skipped if it opens past the limit), exit at the stop, the target or the close after the holding period, 0.05% cost each way. Options are approximate: bought at the quoted price, valued at each contract's daily close." });
+
+  return `<div class="page stack"><div class="grid cols-3-2">${summary}${curve}</div>${open}${closed}</div>`;
+}
+
+const PAGES = { overview: pageOverview, ideas: pageIdeas, themes: pageThemes, headlines: pageHeadlines, why: pageWhy, track: pageTrack, paper: pagePaper };
 
 /* ---------- Shell ---------- */
 
@@ -674,7 +778,7 @@ function currentRoute() {
 }
 
 function renderNav(route) {
-  const badges = { ideas: state.morning?.recs.length, headlines: state.morning?.headlines?.length };
+  const badges = { ideas: state.morning?.recs.length, headlines: state.morning?.headlines?.length, paper: state.paper?.counts.open };
   $("#nav").innerHTML = ROUTES.map((r) => `<li><a href="#/${r.id}" ${r.id === route.id ? 'aria-current="page"' : ""}>${icon(r.icon)}<span>${r.label}</span>${badges[r.id] ? `<span class="badge">${badges[r.id]}</span>` : ""}</a></li>`).join("");
 }
 
@@ -851,6 +955,17 @@ async function loadAll() {
   state.reloading = false;
   render();
   loadTrack();
+  loadPaper();
+}
+
+async function loadPaper() {
+  if (state.paperLoading) return;
+  state.paperLoading = true;
+  state.paperError = null;
+  try { state.paper = await getJSON("/api/paper"); }
+  catch (e) { state.paperError = "Couldn't load paper trades: " + e.message; }
+  state.paperLoading = false;
+  render();
 }
 
 async function loadTrack() {

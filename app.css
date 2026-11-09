@@ -412,6 +412,14 @@ td.title a:hover { color: var(--up-text); }
 .chart .grid-line { stroke: var(--line); stroke-width: 1; }
 .chart .zero { stroke: var(--line-2); stroke-width: 1; }
 .chart .bar-pos { fill: var(--up); }
+.chart .curve { fill: none; stroke-width: 2; stroke-linejoin: round; }
+.chart .curve.pos { stroke: var(--up); }
+.chart .curve.neg { stroke: var(--down); }
+.chart .dot-pos { fill: var(--up); }
+.chart .dot-neg { fill: var(--down); }
+.status { font-size: var(--fs-sm); white-space: nowrap; color: var(--text-2); }
+.status.open { color: var(--up-text); }
+.status.pending, .status.skipped { color: var(--text-3); }
 .chart .bar-neg { fill: var(--down); }
 .chart .call { fill: var(--panel); stroke: var(--text-2); stroke-width: 2; }
 .chart .link { stroke: var(--line-2); stroke-width: 2; }
