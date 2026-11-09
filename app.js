@@ -267,19 +267,21 @@ function drawPriceChart(el, ticker, rec) {
     const up = c("--up");
     const series = priceChart.addSeries(LightweightCharts.AreaSeries, {
       lineColor: up, lineWidth: 2, topColor: up + "40", bottomColor: up + "00", priceLineVisible: false,
-      // Always keep the entry and stop lines in view, even when price never reached them.
+      // Always keep the entry, stop and target lines in view, even when price never reached them.
       autoscaleInfoProvider: (base) => {
         const r = base();
         if (!r) return r;
+        const lines = [rec.price, rec.stop, rec.stock_play?.target].filter((x) => x != null);
         return { ...r, priceRange: {
-          minValue: Math.min(r.priceRange.minValue, rec.price, rec.stop),
-          maxValue: Math.max(r.priceRange.maxValue, rec.price, rec.stop),
+          minValue: Math.min(r.priceRange.minValue, ...lines),
+          maxValue: Math.max(r.priceRange.maxValue, ...lines),
         } };
       },
     });
     series.setData(data);
     series.createPriceLine({ price: rec.price, color: c("--text-3"), lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Entry" });
     series.createPriceLine({ price: rec.stop, color: c("--down"), lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Stop" });
+    if (rec.stock_play) series.createPriceLine({ price: rec.stock_play.target, color: c("--up"), lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: "Target" });
     priceChart.timeScale().fitContent();
   }).catch(() => { el.innerHTML = empty("Couldn't load prices", "The price service didn't respond. Try again in a minute."); });
 }
@@ -357,7 +359,8 @@ function pageOverview() {
         <span class="idea-top">${sidePill(r.side)}<span class="ticker">${esc(r.ticker)}</span>
           <span class="muted small">${esc(r.horizon || "")}</span>
           <span class="idea-conv" title="Conviction from the strategist review">${r.conviction != null ? `Conviction <b>${r.conviction.toFixed(2)}</b>` : ""}</span></span>
-        <span class="idea-nums small"><span>Entry <b>${money(r.price)}</b></span><span>Stop <b>${money(r.stop)}</b></span><span>5-day <b class="${tone(r.ret_5d)}">${pct(r.ret_5d, 1)}</b></span></span>
+        <span class="idea-nums small"><span>Entry <b>${money(r.price)}</b></span><span>Stop <b>${money(r.stop)}</b></span>${r.stock_play ? `<span>Target <b>${money(r.stock_play.target)}</b></span>` : ""}<span>5-day <b class="${tone(r.ret_5d)}">${pct(r.ret_5d, 1)}</b></span></span>
+        ${r.stock_play ? `<span class="idea-play small"><b>${esc(r.stock_play.action)}</b>${r.options_play?.name ? `<span class="muted"> or </span>${esc(r.options_play.name)}` : ""}</span>` : ""}
         <span class="idea-thesis">${esc(r.thesis || r.rationale)}</span>
       </button></li>`).join("")}</ul>${rejectedStrip(m)}`
     : empty("No trade ideas", "No signal was strong enough last run. No trade beats a weak one.")) : noMorning(),
@@ -416,7 +419,7 @@ function pageIdeas() {
     + "Stop = 2× the average daily range. Click a row for details." });
 
   const chart = panel(`<span class="detail-head">${sidePill(r.side)}<span>${esc(r.ticker)}</span></span>`,
-    `<div class="price-chart" id="price-chart">${skeleton(6)}</div>`, { meta: "Last 6 months · entry and stop marked", cls: "fill" });
+    `<div class="price-chart" id="price-chart">${skeleton(6)}</div>`, { meta: "Last 6 months · entry, stop and target marked", cls: "fill" });
   const detail = panel("Why this trade", `
     <p class="section-label">Thesis</p><p class="prose">${esc(r.thesis || r.rationale)}</p>
     ${r.key_risk ? `<p class="section-label">What would prove it wrong</p><p class="prose">${esc(r.key_risk)}</p>` : ""}
@@ -434,7 +437,68 @@ function pageIdeas() {
     { key: "reason", label: "Why it was rejected", cls: "wrap", sortable: false },
   ], m.review.vetoed), { flush: true }) : "";
 
-  return `<div class="page stack">${list}<div class="grid cols-3-2">${chart}${detail}</div>${vetoed}</div>`;
+  return `<div class="page stack">${list}${playsPanel(r, m)}<div class="grid cols-3-2">${chart}${detail}</div>${vetoed}</div>`;
+}
+
+function shortDate(iso) {
+  return new Date(iso.slice(0, 10) + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function playsPanel(r, m) {
+  const sp = r.stock_play, op = r.options_play;
+  const title = `How to trade ${esc(r.ticker)}`;
+  if (!sp) return panel(title, empty("No plays for this run", "Ideas get stock and options plays from the next run on."));
+  const sized = r.shares != null && m.account_size != null;
+  const budget = sized ? m.account_size * m.risk_per_trade : null;
+  const pctOf = (x) => (x * 100).toFixed(0) + "%";
+
+  const stock = `<section class="play" aria-label="Stock play">
+      <p class="section-label">Stock</p>
+      <p class="play-action">${esc(sp.action)} <span class="muted small">limit order</span></p>
+      <dl class="kv">
+        <dt>Last price</dt><dd>${money(sp.last)}</dd>
+        <dt>Stop</dt><dd>${money(sp.stop)} <span class="muted">(${pct(Math.abs(sp.stop / sp.last - 1), 1).replace("+", "")} away)</span></dd>
+        <dt>Target</dt><dd>${money(sp.target)} <span class="muted">(${pct(Math.abs(sp.target / sp.last - 1), 1).replace("+", "")} away)</span></dd>
+        <dt>Reward : risk</dt><dd>${sp.reward_risk} : 1</dd>
+        ${sized ? `<dt>Shares</dt><dd>${r.shares} <span class="muted">(${money(r.shares * sp.last, 0)})</span></dd>` : ""}
+      </dl>
+      <p class="small play-note">${esc(sp.exit)}</p>
+      <p class="muted small">${esc(sp.chase_note)}</p>
+    </section>`;
+
+  let options;
+  if (!op) options = "";
+  else if (op.none) options = `<section class="play" aria-label="Options play"><p class="section-label">Options</p><p class="muted">${esc(op.none)}</p></section>`;
+  else {
+    const maxGain = op.max_gain_per_contract != null ? `${money(op.max_gain_per_contract, 0)} per contract`
+      : (r.side === "LONG" ? `Unlimited above ${money(op.breakeven)}` : `Grows as ${esc(r.ticker)} falls below ${money(op.breakeven)}`);
+    const contracts = !sized || op.contracts == null ? ""
+      : op.contracts ? `<dt>Contracts</dt><dd>${op.contracts} <span class="muted">(${money(op.total_cost, 0)} at risk)</span></dd>`
+      : `<dt>Contracts</dt><dd class="down-text">None fit. 1 contract risks ${money(op.cost_per_contract, 0)}, ${pctOf(op.cost_per_contract / m.account_size)} of the account vs your ${money(budget, 0)} budget.</dd>`;
+    options = `<section class="play" aria-label="Options play">
+      <p class="section-label">Options</p>
+      <p class="play-action">${esc(op.action)}</p>
+      <dl class="kv">
+        <dt>Cost = max loss</dt><dd>${money(op.cost_per_contract, 0)} per contract</dd>
+        <dt>Max gain</dt><dd>${maxGain}</dd>
+        <dt>Breakeven at expiry</dt><dd>${money(op.breakeven)}</dd>
+        <dt>If it hits the target</dt><dd class="${tone(op.gain_at_target)}">${op.gain_at_target >= 0 ? "+" : "−"}${money(Math.abs(op.gain_at_target), 0)} per contract</dd>
+        <dt>Expires</dt><dd>${shortDate(op.expiry)} <span class="muted">(${op.dte} days) · exit by ${shortDate(op.exit_by)}</span></dd>
+        <dt>Implied vol</dt><dd>${pctOf(op.iv)}${op.hv != null ? ` <span class="muted">vs ${pctOf(op.hv)} actual</span>` : ""}</dd>
+        ${contracts}
+      </dl>
+      <table class="legs"><thead><tr><th>Leg</th><th class="num">Bid</th><th class="num">Ask</th><th class="num">Delta</th><th class="num">Open int.</th></tr></thead><tbody>
+        ${op.legs.map((l) => `<tr><td>${l.action === "BUY" ? "Buy" : "Sell"} $${l.strike} ${l.kind}</td><td class="num">${money(l.bid)}</td><td class="num">${money(l.ask)}</td><td class="num">${l.delta.toFixed(2)}</td><td class="num">${l.open_interest.toLocaleString("en-US")}</td></tr>`).join("")}
+      </tbody></table>
+      ${op.why ? `<p class="muted small">${esc(op.why)}</p>` : ""}
+      <p class="small play-note">${esc(op.exit)}</p>
+    </section>`;
+  }
+  return panel(title, `<div class="play-grid">${stock}${options}</div>`, {
+    flush: true,
+    meta: op?.quoted_at ? `Option quotes ${etTime(op.quoted_at)}` : "",
+    note: "Prices are Yahoo quotes, about 15 minutes delayed (before the open, they're the previous close). Check the live bid and ask, and use limit orders.",
+  });
 }
 
 function pageThemes() {
